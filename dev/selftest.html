@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><title>selftest</title>
+<link rel="stylesheet" href="../css/app.css"></head><body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <main class="screen" id="screen"><p class="empty">読み込み中…</p></main>
+  <nav class="tabbar" id="tabbar"></nav>
+</div>
+<div id="sheet" hidden></div>
+<pre id="out">pending</pre>
+<script src="../data/kanji.js"></script>
+<script src="../data/kanji-p1.js"></script>
+<script src="../data/kanji-1.js"></script>
+<script src="../data/jukugo.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/srs.js"></script>
+<script src="../js/ads.js"></script>
+<script src="../js/strokes.js"></script>
+<script src="../js/app.js"></script>
+<script>
+/* 自己診断。サーバー経由で開く（python -m http.server → /dev/selftest.html）。
+   この端末に保存された学習記録は消えるので、普段使うブラウザでは開かないこと。 */
+var L = [];
+function ok(name, cond, extra) { L.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  [" + extra + "]" : "")); }
+function q(s) { return document.querySelector(s); }
+function qa(s) { return document.querySelectorAll(s); }
+function click(s) { var e = q(s); if (!e) { L.push("FAIL click-missing " + s); return false; } e.click(); return true; }
+function uniq(a) { var o = {}; return a.every(function (x) { if (o[x]) return false; o[x] = 1; return true; }); }
+
+window.KANKEN.stroke.setBase("../data/");
+window.addEventListener("load", function () { setTimeout(run, 60); });
+
+function done() {
+  var fail = L.filter(function (s) { return s.indexOf("FAIL") === 0; }).length;
+  var head = "RESULT " + (L.length - fail) + "/" + L.length + " passed";
+  document.getElementById("out").textContent = head + "\n" + L.join("\n");
+  document.title = head;
+}
+
+function run() {
+  try {
+    var S = window.KANKEN.store, R = window.KANKEN.srs, A = window.KANKEN.app;
+    S.reset();
+
+    /* --- データ --- */
+    var K = A.kanji(), Y = A.yoji(), P = A.pairs();
+    ok("kanji 3923+797", K.length === 797 + 865 + 3058, K.length);
+    ok("3級 284", K.filter(function (x) { return x.lv === "3"; }).length === 284);
+    ok("準2級 328", K.filter(function (x) { return x.lv === "p2"; }).length === 328);
+    ok("2級 185", K.filter(function (x) { return x.lv === "2"; }).length === 185);
+    ok("準1級 865", K.filter(function (x) { return x.lv === "p1"; }).length === 865);
+    ok("1級 3058", K.filter(function (x) { return x.lv === "1"; }).length === 3058);
+    var wide = function (x) { return x.lv === "p1" || x.lv === "1"; };
+    /* 準1級・1級は、語の例が乏しい字（異体字・部首・単位の国字など）には例文を載せていない */
+    var exP1 = K.filter(function (x) { return x.lv === "p1" && x.ex.length; }).length;
+    var ex1 = K.filter(function (x) { return x.lv === "1" && x.ex.length; }).length;
+    ok("準1級 examples >= 780", exP1 >= 780, exP1);
+    ok("1級 examples >= 1400", ex1 >= 1400, ex1);
+    ok("yoji >= 150", Y.length >= 150, Y.length);
+    ok("pairs >= 120", P.length >= 120, P.length);
+    ok("kanji ids unique", uniq(K.map(function (x) { return x.id; })));
+    ok("yoji ids unique", uniq(Y.map(function (x) { return x.id; })));
+    ok("pair ids unique", uniq(P.map(function (x) { return x.id; })));
+    var bad = K.filter(function (x) {
+      return !x.m || !x.rad || !x.radn || !(x.st > 0) || x.rd.length < 3 ||
+        (!wide(x) && (!x.ex.length || (!x.on.length && !x.kun.length)));
+    });
+    ok("kanji fields filled", bad.length === 0, bad.map(function (x) { return x.k; }).join(""));
+    var badEx = [];
+    K.forEach(function (x) {
+      x.ex.forEach(function (e) {
+        if (e[0].indexOf(x.k) === -1 || e[2].indexOf("{" + e[0] + "}") === -1 || e[3].length < 3 || e[4].length < 3 ||
+            e[3].indexOf(e[1]) !== -1 || e[4].indexOf(e[0]) !== -1) badEx.push(x.k + e[0]);
+      });
+    });
+    ok("examples: target, sentence mark, 3+ distractors, no answer among distractors", badEx.length === 0, badEx.slice(0, 5).join(","));
+    var badY = Y.filter(function (y) { return y.w.length !== 4 || y.r.length !== 4 || !y.m; });
+    ok("yoji shape", badY.length === 0, badY.map(function (y) { return y.w; }).join(","));
+    ok("yoji blankable", Y.every(function (y) { return y.d.some(function (d) { return d.length >= 3; }); }));
+    ok("alt glyph notes (叱填剥頬)", K.filter(function (x) { return x.alt; }).length === 4);
+
+    /* --- 日付と間隔の計算 --- */
+    ok("intervalFor(0)=1", R.intervalFor(0) === 1);
+    ok("intervalFor(3)=8", R.intervalFor(3) === 8);
+    ok("daysBetween", S.daysBetween("2026-02-28", "2026-03-01") === 1);
+    ok("shiftDays over month", S.shiftDays("2026-01-31", 1) === "2026-02-01");
+
+    /* --- 形式ごとの問題（全字・全熟語で組めるか） --- */
+    var kinds = ["yomi", "kaki", "okuri", "bushu", "kakusu"];
+    kinds.forEach(function (kind) {
+      var errs = [], made = 0;
+      K.forEach(function (x) {
+        for (var n = 0; n < 4; n++) {
+          var qq;
+          try { qq = A.buildOne(kind, x); } catch (e) { errs.push(x.k + ":" + e.message); return; }
+          if (!qq) return;
+          made++;
+          if (qq.choices.length < 3 || qq.answer < 0 || qq.answer >= qq.choices.length || !uniq(qq.choices)) errs.push(x.k);
+        }
+      });
+      ok("build " + kind + " for every kanji", errs.length === 0 && made > 0, "made=" + made + " " + errs.slice(0, 4).join(","));
+    });
+    var okuriN = K.filter(function (x) { return A.buildOne("okuri", x); }).length;
+    ok("okuri available for many kanji", okuriN > 200, okuriN);
+    ["yoji", "pair"].forEach(function (kind) {
+      var errs = [];
+      (kind === "yoji" ? Y : P).forEach(function (x) {
+        for (var n = 0; n < 4; n++) {
+          var qq = A.buildOne(kind, x);
+          if (!qq || qq.choices.length < 4 || !uniq(qq.choices)) { errs.push(x.id); return; }
+        }
+      });
+      ok("build " + kind + " for every item", errs.length === 0, errs.slice(0, 4).join(","));
+    });
+
+    /* --- ホーム --- */
+    S.settings.levels = ["3"];
+    A.init && null;
+    click('[data-tab="home"]');
+    ok("home renders", !!q(".today"));
+    ok("5 level chips", qa(".levels .chip").length === 5);
+    ok("8 kind buttons", qa(".kind-grid .kind-btn").length === 8);
+
+    /* --- 学習の一巡 --- */
+    click('[data-go="study-normal"]');
+    ok("study card", !!q(".card .card__hanzi"));
+    click('[data-act="reveal"]');
+    ok("revealed info grid", !!q(".kinfo") && !!q(".exlist"));
+    var before = S.countStudied(S.today());
+    click('[data-grade="good"]');
+    ok("grade good counts", S.countStudied(S.today()) === before + 1);
+    click('[data-act="reveal"]');
+    click('[data-grade="again"]');
+    ok("again keeps card in queue", !!q(".card"));
+    click('[data-act="leave"]');
+
+    /* --- 小テスト（筆順以外を混ぜる） --- */
+    var qz = A.buildQuiz(["yomi", "kaki", "okuri", "bushu", "kakusu", "yoji", "pair"], 10);
+    ok("mixed quiz 10", qz && qz.qs.length === 10, qz && qz.qs.length);
+    ok("mixed quiz kinds vary", qz && uniq(qz.qs.map(function (x) { return x.ref.id; })));
+    S.settings.kinds = ["yomi", "kaki", "okuri", "bushu", "kakusu", "yoji", "pair"];   // 筆順は読み込みを待つので後で
+    click('[data-go="quiz"]');
+    ok("quiz renders", !!q(".quiz__prompt") && qa(".choice").length >= 3);
+    click('.choice[data-choice="0"]');
+    ok("quiz feedback", !!q(".quiz__feedback[data-ok]"));
+    for (var i = 0; i < 12 && q('[data-act="quiz-next"]'); i++) {
+      click('[data-act="quiz-next"]');
+      if (q('.choice[data-choice="1"]')) click('.choice[data-choice="1"]');
+    }
+    ok("quiz result", !!q(".score-big"));
+    ok("quiz logged", (S.state.log[S.today()] || {}).quiz >= 10);
+
+    /* --- 一覧・熟語・記録 --- */
+    click('[data-tab="list"]');
+    ok("list rows", qa(".word-list .word-row").length === 284);
+    var inp = q("#list-search");
+    inp.value = "あわ"; inp.dispatchEvent(new Event("input", { bubbles: true }));
+    ok("search by kun", qa(".word-list .word-row").length >= 2 && qa(".word-list .word-row").length < 20, qa(".word-list .word-row").length);
+    inp.value = ""; inp.dispatchEvent(new Event("input", { bubbles: true }));
+    click('[data-tab="juku"]');
+    ok("juku yoji list", qa(".word-list .word-row").length > 50);
+    click('[data-jtab="tai"]');
+    ok("juku tai list", qa(".word-list .word-row").length > 20);
+    click('[data-tab="stats"]');
+    ok("stats renders", qa(".kpi").length >= 8);
+
+    /* --- 設定 --- */
+    click('[data-act="settings"]');
+    ok("settings sheet", !!q('#sheet .sheet'));
+    var nk = S.settings.kinds.length;
+    click('[data-kindset="pair"]');
+    ok("kind toggle off", S.settings.kinds.length === nk - 1);
+    click('[data-kindset="pair"]');
+    ok("kind toggle on", S.settings.kinds.length === nk);
+    click('[data-act="sheet-close"]');
+
+    /* --- 筆順（非同期） --- */
+    window.KANKEN.stroke.load(function (loaded) {
+      try {
+        ok("strokes loaded", loaded);
+        var mism = K.filter(function (x) { return window.KANKEN.stroke.count(x.k) !== x.st; });
+        ok("stroke count == 画数 for every kanji", mism.length === 0, mism.map(function (x) { return x.k; }).join(""));
+        var errs = [];
+        K.forEach(function (x) {
+          var qq = A.buildOne("hitsujun", x);
+          if (x.st >= 3 && (!qq || qq.choices.length < 3 || !uniq(qq.choices) || qq.prompt.indexOf("is-hi") === -1)) errs.push(x.k);
+        });
+        ok("build hitsujun for every kanji", errs.length === 0, errs.join(""));
+        var hq = A.buildQuiz(["hitsujun"], 10);
+        ok("hitsujun quiz 10", hq && hq.qs.length === 10);
+
+        click('[data-tab="list"]');
+        click('.word-list .word-row');
+        ok("detail sheet", !!q("#detail-stroke"));
+        setTimeout(function () {
+          var paths = qa("#detail-stroke .strokes__s").length;
+          var x = A.kanji().filter(function (k) { return k.lv === "3"; })[0];
+          ok("detail stroke svg", paths === x.st, paths + " vs " + x.st);
+          click('[data-act="stroke-next"]');
+          ok("stroke step to 1", /^1 \//.test(q("#stroke-n").textContent), q("#stroke-n").textContent);
+          ok("stroke step highlight", qa("#detail-stroke .is-hi").length === 1);
+          click('[data-act="sheet-close"]');
+          S.reset();
+          done();
+        }, 50);
+      } catch (e) { L.push("FAIL exception " + e.message); done(); }
+    }, ["3", "p1", "1"]);
+  } catch (e) {
+    L.push("FAIL exception " + e.message + " " + (e.stack || ""));
+    done();
+  }
+}
+</script>
+</body></html>

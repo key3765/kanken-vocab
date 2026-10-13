@@ -1,0 +1,7 @@
+# OS
+Thumbs.db
+.DS_Store
+
+# 公開データの取得先（tools/fetch_sources.py で作り直せる）
+tools/.cache/
+__pycache__/

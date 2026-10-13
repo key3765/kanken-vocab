@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>preview</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Noto+Serif+JP:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="../css/app.css"></head><body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <main class="screen" id="screen"><p class="empty">読み込み中…</p></main>
+  <nav class="tabbar" id="tabbar"></nav>
+</div>
+<div id="sheet" hidden></div>
+<script src="../data/kanji.js"></script>
+<script src="../data/kanji-p1.js"></script>
+<script src="../data/kanji-1.js"></script>
+<script src="../data/jukugo.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/srs.js"></script>
+<script src="../js/ads.js"></script>
+<script src="../js/strokes.js"></script>
+<script src="../js/app.js"></script>
+<script>
+/* スクリーンショット用: ?v=画面名 で、その画面まで自動で進める（公開不要）。
+   例 ?v=study / ?v=quiz&k=yomi / ?v=detail / ?v=juku / ?v=stats&theme=dark */
+window.KANKEN.stroke.setBase("../data/");
+window.addEventListener("load", function () {
+  var p = new URLSearchParams(location.search), v = p.get("v") || "home";
+  var S = window.KANKEN.store, A = window.KANKEN.app;
+  function c(s) { var e = document.querySelector(s); if (e) e.click(); }
+  if (p.get("theme")) { S.settings.theme = p.get("theme"); }
+  S.settings.levels = (p.get("lv") || "3").split(",");
+  document.querySelector('[data-tab="home"]') && c('[data-tab="home"]');
+  setTimeout(function () {
+    if (v === "study") { c('[data-go="study-normal"]'); if (p.get("r")) c('[data-act="reveal"]'); }
+    if (v === "quiz") {
+      A.startQuiz([p.get("k") || "yomi"]);
+      setTimeout(function () { if (p.get("a")) c('.choice[data-choice="' + p.get("a") + '"]'); }, 400);
+    }
+    if (v === "list") c('[data-tab="list"]');
+    if (v === "detail") { c('[data-tab="list"]'); c('.word-list .word-row:nth-child(' + (p.get("n") || 1) + ')'); }
+    if (v === "juku") c('[data-tab="juku"]');
+    if (v === "stats") c('[data-tab="stats"]');
+    if (v === "settings") c('[data-act="settings"]');
+    if (p.get("measure")) setTimeout(function () {
+      /* 横にはみ出している要素を探す（スクリーンショット確認用） */
+      var W = document.documentElement.clientWidth, out = ["vw=" + W + " sw=" + document.documentElement.scrollWidth];
+      Array.prototype.forEach.call(document.querySelectorAll("body *"), function (n) {
+        var r = n.getBoundingClientRect();
+        if (r.right > W + 1 && out.length < 12) out.push(n.tagName + "." + n.className + " right=" + Math.round(r.right) + " w=" + Math.round(r.width));
+      });
+      var pre = document.createElement("pre"); pre.id = "measure"; pre.textContent = out.join(" | "); document.body.appendChild(pre);
+    }, 800);
+  }, 100);
+});
+</script>
+</body></html>
