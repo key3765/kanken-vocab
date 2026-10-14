@@ -184,7 +184,7 @@ window.KANKEN = window.KANKEN || {};
     var doneToday = store.countStudied(day());
     var goal = store.settings.goal;
     var streak = store.liveStreak(day());
-    var ready = Math.min(sessionSize(), c.due + c.fresh);
+    var ready = srs.buildSession(p, sessionSize(), day()).length;
 
     var pct = goal > 0 ? Math.min(1, doneToday / goal) : 0;
     var R = 48, CIRC = 2 * Math.PI * R;
